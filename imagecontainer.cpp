@@ -1,84 +1,89 @@
-#include <QDebug>
+#include <iostream>
+#include <algorithm>
 #include "imagecontainer.h"
 #include "common.h"
 
-bool ImageContainer::load(const QStringList& filenames, const int textureType, const Qt::TransformationMode mipmapFilter) {
-	const bool mipmapped	= (textureType & FLAG_MIPMAPPED);
+bool ImageContainer::load(const std::vector<std::string>& filenames, int textureType, int mipmapFilter) {
+	bool mipmapped = (textureType & FLAG_MIPMAPPED);
 
 	if ((filenames.size() > 1) && !mipmapped) {
-		qCritical() << "Only one input file may be specified if no mipmap flag has been given.";
+		std::cerr << "[ERROR] Only one input file may be specified if no mipmap flag is set.\n";
 		return false;
 	}
 
-	// Load all given images
-	foreach (const QString& filename, filenames) {
-		const QImage img(filename);
-
-		if (img.isNull()) {
-			qCritical() << "Failed to load image" << filename;
+	
+	for (const auto& filename : filenames) {
+		Image img;
+		if (!img.loadFromFile(filename)) { 
+			std::cerr << "[ERROR] Failed to load image: " << filename << "\n";
 			return false;
 		}
 
 		if (!isValidSize(img.width(), img.height(), textureType)) {
-			qCritical("Image %s has an invalid texture size %dx%d", qPrintable(filename), img.width(), img.height());
+			std::cerr << "[ERROR] Image " << filename
+					  << " has invalid texture size "
+					  << img.width() << "x" << img.height() << "\n";
 			return false;
 		}
 
-		if (mipmapped && (img.width() != img.height())) {
-			qCritical() << "Image" << filename << "is not square. Input images for mipmapped textures must be square";
+		if (mipmapped && img.width() != img.height()) {
+			std::cerr << "[ERROR] Image " << filename
+					  << " is not square. Mipmapped textures require square images.\n";
 			return false;
 		}
 
-		textureSize = textureSize.expandedTo(img.size());
-		images.insert(img.width(), img);
+		textureWidth  = std::max(textureWidth, img.width());
+		textureHeight = std::max(textureHeight, img.height());
 
-		qDebug() << "Loaded image" << filename;
+		images[img.width()] = img;  
+		std::cout << "[INFO] Loaded image " << filename << "\n";
 	}
 
 	if (mipmapped) {
-		if (mipmapFilter == Qt::FastTransformation) {
-			qDebug("Using nearest-neighbor filtering for mipmaps");
-		} else if (mipmapFilter == Qt::SmoothTransformation) {
-			qDebug("Using bilinear filtering for mipmaps");
+		if (mipmapFilter == 0) { 
+			std::cout << "[INFO] Using nearest-neighbor filtering for mipmaps\n";
+		} else {
+			std::cout << "[INFO] Using bilinear filtering for mipmaps\n";
 		}
 
-		// Generate any missing images by scaling down the size above them
-		for (int size=(TEXTURE_SIZE_MAX/2); size>=1; size/=2) {
-			if (images.contains(size*2) && !images.contains(size)) {
-				const QImage mipmap = images.value(size*2).scaledToWidth(size, mipmapFilter);
-				images.insert(size, mipmap);
-				qDebug("Generated %dx%d mipmap", size, size);
+		
+		for (int size = TEXTURE_SIZE_MAX/2; size >= 1; size /= 2) {
+			if (images.count(size*2) && !images.count(size)) {
+				Image mipmap = images[size*2].scaled(size, size,
+														 mipmapFilter == 0); 
+				images[size] = mipmap;
+				std::cout << "[INFO] Generated " << size << "x" << size << " mipmap\n";
 			}
 		}
 	}
 
-	// Make sure we have at least one ok image
-	if (width() < TEXTURE_SIZE_MIN || height() < TEXTURE_SIZE_MIN) {
-		qCritical("At least one input image must be 8x8 or larger.");
+	if (textureWidth < TEXTURE_SIZE_MIN || textureHeight < TEXTURE_SIZE_MIN) {
+		std::cerr << "[ERROR] At least one input image must be 8x8 or larger.\n";
 		return false;
 	}
 
-	// Save keys for easy iteration
-	keys = images.keys();
+	
+	keys.clear();
+	for (auto& kv : images) keys.push_back(kv.first);
 	std::sort(keys.begin(), keys.end());
 
 	return true;
 }
 
 void ImageContainer::unloadAll() {
-	textureSize = QSize(0, 0);
+	textureWidth = 0;
+	textureHeight = 0;
 	images.clear();
 	keys.clear();
 }
 
-QImage ImageContainer::getByIndex(int index, bool ascending) const {
-	if (index >= keys.size()) {
-		return QImage();
+const Image& ImageContainer::getByIndex(int index, bool ascending) const {
+	if (index >= (int)keys.size()) {
+		static Image dummy; 
+		return dummy;
 	} else {
-		index = ascending ? index : (keys.size() - index - 1);
-		int size = keys[index];
-		return images.value(size);
+		int realIdx = ascending ? index : ((int)keys.size() - index - 1);
+		int size = keys[realIdx];
+		return images.at(size);
 	}
 }
-
-

@@ -1,76 +1,78 @@
 #include "palette.h"
 #include "imagecontainer.h"
 
-#include <QFile>
-#include <QDebug>
+#include <fstream>
+#include <iostream>
+#include <cstring>
 
 Palette::Palette(const ImageContainer& images) {
-	for (int i=0; i<images.imageCount(); i++) {
-		const QImage& img = images.getByIndex(i);
-		for (int y=0; y<img.height(); y++)
-			for (int x=0; x<img.width(); x++)
-				insert(img.pixel(x, y));
+	for (int i=0;i<images.imageCount();i++) {
+		const Image& img=images.getByIndex(i);
+		for (int y=0;y<img.height();y++)
+			for (int x=0;x<img.width();x++)
+				insert(packColor(img.pixel(x,y)));
 	}
 }
 
-void Palette::insert(const QRgb color) {
-	if (!colors.contains(color))
-		colors.insert(color, colors.size());
+void Palette::insert(uint32_t color) {
+	if (colorsMap.find(color)==colorsMap.end()) {
+		int idx=(int)colorsVec.size();
+		colorsMap[color]=idx;
+		colorsVec.push_back(color);
+	}
 }
 
-bool Palette::save(const QString& filename) const {
-	QFile file(filename);
-
-	if (file.open(QIODevice::WriteOnly)) {
-		QDataStream out(&file);
-		out.setByteOrder(QDataStream::LittleEndian);
-
-		// Write header
-		out.writeRawData(PALETTE_MAGIC, 4);
-		out << (qint32)colors.size();
-
-		// Write the colors
-		for (int i=0; i<colors.size(); i++)
-			out << (quint32)colors.key(i);
-
-		file.close();
-		return true;
-	}
-
-	qCritical() << "Failed to open" << filename;
-	return false;
+int Palette::indexOf(uint32_t argb) const {
+	auto it=colorsMap.find(argb);
+	return (it!=colorsMap.end()) ? it->second : 0;
 }
 
-bool Palette::load(const QString& filename) {
-	QFile file(filename);
+uint32_t Palette::colorAt(int index) const {
+	if (index>=0 && index<(int)colorsVec.size())
+		return colorsVec[index];
+	return 0xFF000000; 
+}
 
-	if (file.open(QIODevice::ReadOnly)) {
-		char magic[4];
-		qint32 numColors = 0;
-
-		QDataStream in(&file);
-		in.setByteOrder(QDataStream::LittleEndian);
-
-		// Read header
-		in.readRawData(magic, 4);
-		if (memcmp(magic, PALETTE_MAGIC, 4) != 0) {
-			qCritical() << filename << "is not a valid palette file";
-			return false;
-		}
-		in >> numColors;
-
-		// Read colors
-		colors.clear();
-		for (int i=0; i<numColors; i++) {
-			quint32 color = 0xFF000000;
-			in >> color;
-			colors.insert((QRgb)color, i);
-		}
-
-		file.close();
-		return true;
+bool Palette::save(const std::string& filename) const {
+	std::ofstream out(filename,std::ios::binary);
+	if (!out.is_open()) {
+		std::cerr<<"[ERROR] Failed to open "<<filename<<" for writing\n";
+		return false;
 	}
 
-	qCritical() << "Failed to open" << filename;
-	return false;
+	
+	out.write(TEXTURE_MAGIC,4); 
+	int32_t n=colorCount();
+	out.write((char*)&n,sizeof(int32_t));
+
+	
+	for (uint32_t c:colorsVec)
+		out.write((char*)&c,sizeof(uint32_t));
+
+	out.close();
+	return true;
+}
+
+bool Palette::load(const std::string& filename) {
+	std::ifstream in(filename,std::ios::binary);
+	if (!in.is_open()) {
+		std::cerr<<"[ERROR] Failed to open "<<filename<<" for reading\n";
+		return false;
+	}
+	char magic[4];
+	in.read(magic,4);
+	if (memcmp(magic,PALETTE_MAGIC,4)!=0) {
+		std::cerr<<"[ERROR] "<<filename<<" is not a valid palette file\n";
+		return false;
+	}
+	int32_t numColors=0;
+	in.read((char*)&numColors,sizeof(int32_t));
+
+	clear();
+	for (int i=0;i<numColors;i++) {
+		uint32_t c;
+		in.read((char*)&c,sizeof(uint32_t));
+		insert(c);
+	}
+	return true;
 }

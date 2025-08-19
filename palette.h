@@ -1,33 +1,30 @@
-#ifndef PALETTE_H
-#define PALETTE_H
+#pragma once
 
-#include <QtGlobal>
-#include <QHash>
-#include <QColor>
+#include <unordered_map>
+#include <vector>
+#include <string>
+#include <cstdint>
+#include "common.h"
 
 class ImageContainer;
 
 class Palette {
 public:
-
-	Palette() {}
+	Palette() = default;
 	Palette(const ImageContainer& images);
 
-	int colorCount() const { return colors.size(); }
+	int colorCount() const { return (int)colorsVec.size(); }
+	void clear() { colorsMap.clear(); colorsVec.clear(); }
 
-	void clear() { colors.clear(); }
+	void insert(uint32_t argb);
 
-	void insert(const QRgb color);
+	int indexOf(uint32_t argb) const;
+	uint32_t colorAt(int index) const;
 
-	int indexOf(const QRgb color) const { return colors.value(color, 0); }
-	QRgb colorAt(const int index) const { return colors.key(index, qRgb(0, 0, 0)); }
-
-	bool load(const QString& filename);
-	bool save(const QString& filename) const;
+	bool load(const std::string& filename);
+	bool save(const std::string& filename) const;
 
 private:
-	// "Color" <=> "Palette index"
-	QHash<QRgb, int> colors;
+	std::unordered_map<uint32_t,int> colorsMap;
+	std::vector<uint32_t> colorsVec;
 };
-
-#endif // PALETTE_H

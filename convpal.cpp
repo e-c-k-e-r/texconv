@@ -2,55 +2,60 @@
 #include "twiddler.h"
 #include "palette.h"
 #include "vqtools.h"
+#include "common.h"
 
-#include <QHash>
-#include <QFile>
-#include <QPainter>
-#include <QThread>
+#include <iostream>
+#include <vector>
+#include <cstring>
 
-static void vectorizeARGB(const ImageContainer& images, QVector<Vec<4>>& vectors) {
-	for (int i=0; i<images.imageCount(); i++) {
-		const QImage& img = images.getByIndex(i);
-		for (int y=0; y<img.height(); y++) {
-			for (int x=0; x<img.width(); x++) {
-				const QRgb pixel = img.pixel(x, y);
-				Vec<4> vec(pixel);
-				argb2vec(pixel, vec);
+static void vectorizeARGB(const ImageContainer& images, std::vector<Vec<4>>& vectors) {
+	for ( int i = 0; i < images.imageCount(); i++ ) {
+		const Image& img = images.getByIndex(i);
+		for ( int y = 0; y < img.height(); y++ ) {
+			for ( int x=0; x < img.width(); x++ ) {
+				RGBA px = img.pixel(x,y);
+				Vec<4> vec;
+				vec[0] = px.a/255.f;
+				vec[1] = px.r/255.f;
+				vec[2] = px.g/255.f;
+				vec[3] = px.b/255.f;
 				vectors.push_back(vec);
 			}
 		}
 	}
 }
 
-static void devectorizeARGB(const ImageContainer& srcImages, const QVector<Vec<4>>& vectors, const VectorQuantizer<4>& vq, QVector<QImage>& indexedImages, Palette& palette) {
+static void devectorizeARGB(const ImageContainer& srcImages, const std::vector<Vec<4>>& vectors, const VectorQuantizer<4>& vq, std::vector<Image>& indexedImages, Palette& palette) {
 	int vindex = 0;
-	for (int i=0; i<srcImages.imageCount(); i++) {
-		const QImage& srcImg = srcImages.getByIndex(i);
-		QImage dstImg(srcImg.size(), QImage::Format_ARGB32);
-		for (int y=0; y<dstImg.height(); y++) {
-			for (int x=0; x<dstImg.width(); x++) {
-				const Vec<4>& vec = vectors[vindex];
+	for ( int i = 0; i < srcImages.imageCount(); i++ ) {
+		const Image& src = srcImages.getByIndex(i);
+		Image dst( src.width(), src.height() );
+		dst.allocateIndexed(256);
+
+		for ( int y = 0; y < src.height(); y++ ) {
+			for ( int x = 0; x < src.width(); x++ ) {
+				const Vec<4>& vec = vectors[vindex++];
 				int codeIndex = vq.findClosest(vec);
-				dstImg.setPixel(x, y, codeIndex);
-				vindex++;
+				dst.setIndexedPixel( x, y, (uint8_t) codeIndex );
 			}
 		}
-		indexedImages.push_back(dstImg);
+		indexedImages.push_back(dst);
 	}
-
-	for (int i=0; i<vq.codeCount(); i++) {
-		QRgb color;
-		vec2argb(vq.codeVector(i), color);
+	
+	for ( int i = 0; i < vq.codeCount(); i++ ) {
+		const Vec<4>& v = vq.codeVector(i);
+		uint32_t color = (uint8_t)( v[0]*255)<<24 | (uint8_t)(v[1]*255)<<16 |
+					    (uint8_t)( v[2]*255)<<8 | (uint8_t)(v[3]*255);
 		palette.insert(color);
 	}
 }
 
-void convertToIndexedImages(const ImageContainer& src, const Palette& pal, QVector<QImage>& dst);
-void writeUncompressed4BPPData(QDataStream& stream, const QVector<QImage>& indexedImages);
-void writeUncompressed8BPPData(QDataStream& stream, const QVector<QImage>& indexedImages);
-void writeUncompressedPreview(const QString& filename, const QVector<QImage>& indexedImages, const Palette& palette);
-void writeCompressed4BPPData(QDataStream& stream, const QVector<QImage>& indexedImages, const Palette& palette);
-void writeCompressed8BPPData(QDataStream& stream, const QVector<QImage>& indexedImages, const Palette& palette);
+void convertToIndexedImages(const ImageContainer& src, const Palette& pal, std::vector<Image>& dst);
+void writeUncompressed4BPPData(std::ostream& stream, const std::vector<Image>& indexedImages);
+void writeUncompressed8BPPData(std::ostream& stream, const std::vector<Image>& indexedImages);
+void writeUncompressedPreview(const std::string& filename, const std::vector<Image>& indexedImages, const Palette& palette);
+void writeCompressed4BPPData(std::ostream& stream, const std::vector<Image>& indexedImages, const Palette& palette);
+void writeCompressed8BPPData(std::ostream& stream, const std::vector<Image>& indexedImages, const Palette& palette);
 
 /*
  * This conversion basically has three modes:
@@ -67,21 +72,20 @@ void writeCompressed8BPPData(QDataStream& stream, const QVector<QImage>& indexed
  *    Then, using the reduced images as input, perform vector quantization
  *    with a vector dimension of 32 or 64 (2x4 or 4x4 pixel blocks).
  */
-
-void convertPaletted(QDataStream& stream, const ImageContainer& images, int textureType, const QString& paletteFilename) {
+void convertPaletted(std::ostream& stream, const ImageContainer& images, int textureType, const std::string& paletteFilename) {
 	const int maxColors = isFormat(textureType, PIXELFORMAT_PAL4BPP) ? 16 : 256;
 	Palette palette(images);
-	QVector<QImage> indexedImages;
+	std::vector<Image> indexedImages;
 
-	qDebug("Palette contains %d colors", palette.colorCount());
+	//qDebug("Palette contains %d colors", palette.colorCount());
 
 	if (palette.colorCount() > maxColors) {
 		// The palette has too many colors, so perform a vector quantization to reduce
 		// the color count down to what we need.
-		qDebug("Reducing palette to %d colors", maxColors);
+		//qDebug("Reducing palette to %d colors", maxColors);
 		palette.clear();
 		VectorQuantizer<4> vq;
-		QVector<Vec<4>> vectors;
+		std::vector<Vec<4>> vectors;
 		vectorizeARGB(images, vectors);
 		vq.compress(vectors, maxColors);
 		devectorizeARGB(images, vectors, vq, indexedImages, palette);
@@ -111,30 +115,35 @@ void convertPaletted(QDataStream& stream, const ImageContainer& images, int text
 
 // Converts the src images to indexed images.
 // The indexed images are sorted from smallest to largest.
-void convertToIndexedImages(const ImageContainer& src, const Palette& pal, QVector<QImage>& dst) {
+void convertToIndexedImages(const ImageContainer& src, const Palette& pal, std::vector<Image>& dst) {
 	for (int i=0; i<src.imageCount(); i++) {
-		const QImage& img = src.getByIndex(i);
-		QImage dstImg(img.width(), img.height(), QImage::Format_ARGB32);
+		const Image& img = src.getByIndex(i);
+		Image dstImg(img.width(), img.height()/*, Image::Format_ARGB32*/);
 		for (int y=0; y<img.height(); y++)
-			for (int x=0; x<img.width(); x++)
-				dstImg.setPixel(x, y, pal.indexOf(img.pixel(x, y)));
+			for (int x=0; x<img.width(); x++) {
+				RGBA px = img.pixel(x,y);
+				uint32_t argb = packColor(px);
+				uint8_t index = (uint8_t) pal.indexOf(argb);
+				dstImg.setIndexedPixel( x, y, index );
+			}
 		dst.push_back(dstImg);
 	}
 }
 
-void writeUncompressed4BPPData(QDataStream& stream, const QVector<QImage>& indexedImages) {
+void writeUncompressed4BPPData(std::ostream& stream, const std::vector<Image>& indexedImages) {
 	// Write mipmap offset if necessary
 	if (indexedImages.size() > 1)
 		writeZeroes(stream, MIPMAP_OFFSET_4BPP);
 
 	// Write all mipmaps from smallest to largest
 	for (int i=0; i<indexedImages.size(); i++) {
-		const QImage& img = indexedImages[i];
+		const Image& img = indexedImages[i];
 
 		// Special case. There's only one pixel in the 1x1 mipmap level,
 		// but it's stored by itself in one byte.
 		if (img.width() == 1) {
-			stream << (quint8)img.pixel(0, 0);
+			uint8_t val = img.indexedPixelAt(0,0);
+			stream.write( (char*) &val, 1 );
 			continue;
 		}
 
@@ -145,28 +154,29 @@ void writeUncompressed4BPPData(QDataStream& stream, const QVector<QImage>& index
 		// First pixel in the least significant nibble.
 		// Second pixel in the most significant nibble.
 		for (int j=0; j<pixels; j+=2) {
-			quint8 palindex[2];
+			uint8_t palindex[2];
 
 			for (int k=0; k<2; k++) {
 				const int index = twiddler.index(j + k);
 				const int x = index % img.width();
 				const int y = index / img.width();
-				palindex[k] = (quint8)img.pixel(x, y);
+				palindex[k] = (uint8_t) img.indexedPixelAt(x, y);
 			}
 
-			stream << (quint8)(((palindex[1] & 0xF) << 4) | (palindex[0] & 0xF));
+			uint8_t packed = (((palindex[1] & 0xF) << 4) | (palindex[0] & 0xF));
+			stream.write( (char*) &packed, 1 );
 		}
 	}
 }
 
-void writeUncompressed8BPPData(QDataStream& stream, const QVector<QImage>& indexedImages) {
+void writeUncompressed8BPPData(std::ostream& stream, const std::vector<Image>& indexedImages) {
 	// Write mipmap offset if necessary
 	if (indexedImages.size() > 1)
 		writeZeroes(stream, MIPMAP_OFFSET_8BPP);
 
 	// Write all mipmaps from smallest to largest
 	for (int i=0; i<indexedImages.size(); i++) {
-		const QImage& img = indexedImages[i];
+		const Image& img = indexedImages[i];
 
 		Twiddler twiddler(img.width(), img.height());
 		const int pixels = img.width() * img.height();
@@ -175,7 +185,8 @@ void writeUncompressed8BPPData(QDataStream& stream, const QVector<QImage>& index
 			const int index = twiddler.index(j);
 			const int x = index % img.width();
 			const int y = index / img.width();
-			stream << (quint8)img.pixel(x, y);
+			uint8_t value = img.indexedPixelAt(x, y);
+			stream.write( (char*) &value, 1 );
 		}
 	}
 }
@@ -187,7 +198,7 @@ void writeUncompressed8BPPData(QDataStream& stream, const QVector<QImage>& index
 #define STORE_RIGHT	2	// Store the block in the right half of a 64D vector
 
 template<uint N>
-static void grab2x4Block(const QImage& img, const Palette& pal, const int x, const int y, Vec<N>& vec, const uint storeMethod) {
+static void grab2x4Block(const Image& img, const Palette& pal, const int x, const int y, Vec<N>& vec, const uint storeMethod) {
 	static const int indexLUT[3][8] = {
 		{ 0,  4,  8, 12, 16, 20, 24, 28 }, // Full 32D vector
 		{ 0,  4, 16, 20, 32, 36, 48, 52 }, // Left half of 64D vector
@@ -199,9 +210,10 @@ static void grab2x4Block(const QImage& img, const Palette& pal, const int x, con
 
 	for (int yy=y; yy<(y+4); yy++) {
 		for (int xx=x; xx<(x+2); xx++) {
-			QRgb pixel = pal.colorAt(img.pixel(xx, yy));
+			uint32_t pixel = pal.colorAt(img.indexedPixelAt(xx, yy));
 			argb2vec(pixel, vec, indexLUT[storeMethod][index]);
-			hash = combineHash(pixel, hash);
+			RGBA color = unpackColor( pixel );
+			hash = combineHash(color, hash);
 			index++;
 		}
 	}
@@ -209,7 +221,7 @@ static void grab2x4Block(const QImage& img, const Palette& pal, const int x, con
 	vec.setHash(hash);
 }
 
-static void vectorizePalette(const Palette& pal, QVector<Vec<4>>& vectors) {
+static void vectorizePalette(const Palette& pal, std::vector<Vec<4>>& vectors) {
 	for (int i=0; i<pal.colorCount(); i++) {
 		Vec<4> vec;
 		argb2vec(pal.colorAt(i), vec);
@@ -217,22 +229,22 @@ static void vectorizePalette(const Palette& pal, QVector<Vec<4>>& vectors) {
 	}
 }
 
-static quint8 findClosest(const QVector<Vec<4>>& vectors, const Vec<4>& vec) {
-	quint8 closestIndex = 0;
+static uint8_t findClosest(const std::vector<Vec<4>>& vectors, const Vec<4>& vec) {
+	uint8_t closestIndex = 0;
 	float closestDistance = Vec<4>::distanceSquared(vectors[0], vec);
 	for (int i=1; i<vectors.size(); i++) {
 		float distance = Vec<4>::distanceSquared(vectors[i], vec);
 		if (distance < closestDistance)	{
-			closestIndex = (quint8)i;
+			closestIndex = (uint8_t)i;
 			closestDistance = distance;
 		}
 	}
 	return closestIndex;
 }
 
-void writeCompressed4BPPData(QDataStream& stream, const QVector<QImage>& indexedImages, const Palette& palette) {
+void writeCompressed4BPPData(std::ostream& stream, const std::vector<Image>& indexedImages, const Palette& palette) {
 	VectorQuantizer<64> vq;
-	QVector<Vec<64>> vectors;
+	std::vector<Vec<64>> vectors;
 
 	// Vectorize the input images.
 	// Each vector represents a pair of 2x4 pixel blocks. For single images, it's
@@ -246,7 +258,7 @@ void writeCompressed4BPPData(QDataStream& stream, const QVector<QImage>& indexed
 		Vec<64> vec(0);
 
 		for (int i=0; i<indexedImages.size(); i++) {
-			const QImage& img = indexedImages[i];
+			const Image& img = indexedImages[i];
 
 			// Ignore images smaller than this
 			if (img.width() < MIN_MIPMAP_PALVQ || img.height() < MIN_MIPMAP_PALVQ)
@@ -297,7 +309,7 @@ void writeCompressed4BPPData(QDataStream& stream, const QVector<QImage>& indexed
 		// is simple. Twiddle the data here though, since the mipmapped
 		// vectors need to be twiddled, so the same code can be used to
 		// devectorize this as well as mipmapped stuff.
-		const QImage& img = indexedImages[0];
+		const Image& img = indexedImages[0];
 		const int imgw = img.width();
 		const int imgh = img.height();
 		const int blocks = (imgw * imgh) / 16;
@@ -319,11 +331,11 @@ void writeCompressed4BPPData(QDataStream& stream, const QVector<QImage>& indexed
 
 	// The palette needs to be in a vector format for the next part,
 	// since we need to be able to perform searches in it.
-	QVector<Vec<4>> vectorizedPalette;
+	std::vector<Vec<4>> vectorizedPalette;
 	vectorizePalette(palette, vectorizedPalette);
 
 	// Build the codebook
-	quint8 codebook[2048];
+	uint8_t codebook[2048];
 	memset(codebook, 0, 2048);
 	const Twiddler nibbleLUT(4, 4);
 	for (int i=0; i<vq.codeCount(); i++) {
@@ -337,7 +349,7 @@ void writeCompressed4BPPData(QDataStream& stream, const QVector<QImage>& indexed
 			color.set(3, vec[nibbleLUT.index(j) * 4 + 3]);
 
 			// Search the vectorized palette for the closest index
-			quint8 closestIndex = findClosest(vectorizedPalette, color);
+			uint8_t closestIndex = findClosest(vectorizedPalette, color);
 
 			const int byte = j / 2;
 			const int nibble = j % 2;
@@ -350,7 +362,7 @@ void writeCompressed4BPPData(QDataStream& stream, const QVector<QImage>& indexed
 	}
 
 	// Write the codebook
-	stream.writeRawData((char*)codebook, 2048);
+	stream.write( (char*) codebook, 2048 );
 
 	// Don't write out a zero for the 1x1 mipmap like we would usually
 	// do for mipmapped VQ textures. The reason for this is that it's
@@ -363,22 +375,22 @@ void writeCompressed4BPPData(QDataStream& stream, const QVector<QImage>& indexed
 	for (int i=0; i<vectors.size(); i++) {
 		const Vec<64>& srcvec = vectors.at(i);
 		const int c = vq.findClosest(srcvec);
-		stream << (quint8)c;
+		stream << (uint8_t)c;
 	}
 }
 
 
 
-void writeCompressed8BPPData(QDataStream& stream, const QVector<QImage>& indexedImages, const Palette& palette) {
+void writeCompressed8BPPData(std::ostream& stream, const std::vector<Image>& indexedImages, const Palette& palette) {
 	VectorQuantizer<32> vq;
-	QVector<Vec<32>> vectors;
+	std::vector<Vec<32>> vectors;
 
 	// Vectorize the input images.
 	// Each vector represents a 2x4 pixel block.
 	// Grab the data as twiddled, it's simpler than twiddling it
 	// when we write it to file.
 	for (int i=0; i<indexedImages.size(); i++) {
-		const QImage& img = indexedImages[i];
+		const Image& img = indexedImages[i];
 
 		// Ignore images smaller than this
 		if (img.width() < MIN_MIPMAP_PALVQ || img.height() < MIN_MIPMAP_PALVQ)
@@ -407,11 +419,11 @@ void writeCompressed8BPPData(QDataStream& stream, const QVector<QImage>& indexed
 
 	// The palette needs to be in a vector format for the next part,
 	// since we need to be able to perform searches in it.
-	QVector<Vec<4>> vectorizedPalette;
+	std::vector<Vec<4>> vectorizedPalette;
 	vectorizePalette(palette, vectorizedPalette);
 
 	// Build the codebook
-	quint8 codebook[2048];
+	uint8_t codebook[2048];
 	memset(codebook, 0, 2048);
 	const Twiddler nibbleLUT(2, 4);
 	for (int i=0; i<vq.codeCount(); i++) {
@@ -430,7 +442,7 @@ void writeCompressed8BPPData(QDataStream& stream, const QVector<QImage>& indexed
 	}
 
 	// Write the codebook
-	stream.writeRawData((char*)codebook, 2048);
+	stream.write( (char*) codebook, 2048 );
 
 	// Write the 1x1 mipmap level
 	if (indexedImages.size() > 1)
@@ -440,6 +452,6 @@ void writeCompressed8BPPData(QDataStream& stream, const QVector<QImage>& indexed
 	for (int i=0; i<vectors.size(); i++) {
 		const Vec<32>& srcvec = vectors.at(i);
 		const int c = vq.findClosest(srcvec);
-		stream << (quint8)c;
+		stream << (uint8_t)c;
 	}
 }

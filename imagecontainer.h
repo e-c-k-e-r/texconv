@@ -1,55 +1,30 @@
-#ifndef IMAGECONTAINER_H
-#define IMAGECONTAINER_H
+#pragma once
 
-#include <QStringList>
-#include <QSize>
-#include <QMap>
-#include <QList>
-#include <QImage>
-#include "common.h"
+#include <string>
+#include <map>
+#include <vector>
+#include "image.h"
 
-// Wrapper class for a collection of QImages.
-// Allows for easy access by size and iteration from smallest to largest or
-// largest to smallest texture.
-//
-// The container has two different states:
-// If HasMipmaps() == false:
-//   There's one image in the container, and it may be rectangular.
-// If HasMipmaps() == true:
-//   The container has a number of square images ranging from the largest one
-//   loaded down to 1x1 pixels.
 class ImageContainer {
 public:
+	
+	bool load(const std::vector<std::string>& filenames, int textureType, int mipmapFilter);
 
-	/**
-	 * Loads all images given in filenames. If an image of the same size is loaded twice,
-	 * the previous instance will be overwritten.
-	 *
-	 * If flags does not contain FLAG_MIPMAPPED:
-	 *   Only one filename may be given and the image may be rectangular.
-	 * If flags conatain FLAG_MIPMAPPED:
-	 *   Any number of filenames may be given. All images must be square. Any missing
-	 *   mipmap levels will be generated automatically.
-	 */
-	bool load(const QStringList& filenames, const int textureType, const Qt::TransformationMode mipmapFilter);
 	void unloadAll();
 
 	bool hasMipmaps() const { return images.size() > 1; }
-	bool hasSize(const int size) const { return images.contains(size); }
+	bool hasSize(int size) const { return images.find(size) != images.end(); }
 
-	QImage getByIndex(int index, bool ascending = true) const;
-	QImage getBySize(const int size) const { return images.value(size); }
+	const Image& getByIndex(int index, bool ascending=true) const;
+	const Image& getBySize(int size) const { return images.at(size); }
 
-	int imageCount() const { return images.size(); }
-	int width() const { return textureSize.width(); }
-	int height() const { return textureSize.height(); }
-	QSize size() const { return textureSize; }
-
+	int imageCount() const { return (int)images.size(); }
+	int width() const { return textureWidth; }
+	int height() const { return textureHeight; }
 
 private:
-	QSize				textureSize = QSize(0, 0);
-	QMap<int, QImage>	images;
-	QList<int>			keys;
+	int textureWidth = 0;
+	int textureHeight = 0;
+	std::map<int, Image> images;   
+	std::vector<int> keys;			 
 };
-
-#endif // IMAGECONTAINER_H

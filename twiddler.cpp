@@ -24,7 +24,6 @@ int Twiddler::twiddle(int* output, int stride, int x, int y, int blocksize, int 
 
 	switch (blocksize) {
 	case 1:
-		// Can't divide anymore
 		output[seq++] = y * stride + x;
 		break;
 	default:

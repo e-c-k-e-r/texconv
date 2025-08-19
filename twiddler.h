@@ -1,9 +1,5 @@
-#ifndef TWIDDLER_H
-#define TWIDDLER_H
+#pragma once
 
-/**
- * Class to allow for easy twiddling of textures
- */
 class Twiddler {
 public:
 
@@ -21,5 +17,3 @@ private:
 	int		m_height;
 	int*	m_index;
 };
-
-#endif // TWIDDLER_H

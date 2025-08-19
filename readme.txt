@@ -1,11 +1,9 @@
 texconv is a utility for creating textures for the SEGA Dreamcast hardware.
 
-Requires Qt 5.2 or newer.
-
-Supports all image formats supported by Qt. 
+Supports all image formats supported by stbi. 
 At the time I'm writing this, these formats are supported:
 
-Format	Description								Qt's support
+Format	Description								
 BMP		Windows Bitmap							Read/write
 GIF		Graphic Interchange Format (optional)	Read
 JPG		Joint Photographic Experts Group		Read/write
